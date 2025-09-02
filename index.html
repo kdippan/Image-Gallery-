@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Viewer - Unsplash Gallery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .masonry {
+            column-count: 3;
+            column-gap: 1rem;
+        }
+        .masonry-item {
+            break-inside: avoid;
+            margin-bottom: 1rem;
+        }
+        @media (max-width: 768px) {
+            .masonry {
+                column-count: 2;
+            }
+        }
+        @media (max-width: 480px) {
+            .masonry {
+                column-count: 1;
+            }
+        }
+        .modal {
+            backdrop-filter: blur(10px);
+        }
+        .loading-shimmer {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-6">
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-3xl font-bold text-gray-900">📸 Image Gallery</h1>
+                <div class="text-sm text-gray-500">Powered by Unsplash</div>
+            </div>
+            
+            <!-- Search Bar -->
+            <div class="relative max-w-2xl mx-auto">
+                <input 
+                    type="text" 
+                    id="searchInput"
+                    placeholder="Search for photos... (nature, city, people, etc.)"
+                    class="w-full px-6 py-4 text-lg border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
+                >
+                <button 
+                    id="searchBtn"
+                    class="absolute right-2 top-2 bg-blue-600 text-white px-6 py-2 rounded-full hover:bg-blue-700 transition-colors"
+                >
+                    Search
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Loading State -->
+    <div id="loadingState" class="max-w-7xl mx-auto px-4 py-8">
+        <div class="masonry">
+            <div class="masonry-item loading-shimmer h-64 rounded-lg"></div>
+            <div class="masonry-item loading-shimmer h-80 rounded-lg"></div>
+            <div class="masonry-item loading-shimmer h-72 rounded-lg"></div>
+            <div class="masonry-item loading-shimmer h-96 rounded-lg"></div>
+            <div class="masonry-item loading-shimmer h-64 rounded-lg"></div>
+            <div class="masonry-item loading-shimmer h-88 rounded-lg"></div>
+        </div>
+    </div>
+
+    <!-- Gallery -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div id="gallery" class="masonry hidden"></div>
+        
+        <!-- Load More Button -->
+        <div class="text-center mt-8">
+            <button 
+                id="loadMoreBtn"
+                class="bg-gray-800 text-white px-8 py-3 rounded-full hover:bg-gray-900 transition-colors hidden"
+            >
+                Load More Photos
+            </button>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div id="modal" class="fixed inset-0 bg-black bg-opacity-75 modal hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl">
+            <div class="relative">
+                <button 
+                    id="closeModal"
+                    class="absolute top-4 right-4 bg-black bg-opacity-50 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-opacity-70 transition-all z-10"
+                >
+                    ✕
+                </button>
+                <img id="modalImage" src="" alt="" class="w-full h-auto max-h-[60vh] object-contain">
+            </div>
+            <div class="p-6">
+                <h3 id="modalTitle" class="text-xl font-semibold text-gray-900 mb-2"></h3>
+                <p id="modalDescription" class="text-gray-600 mb-4"></p>
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <img id="authorAvatar" src="" alt="" class="w-10 h-10 rounded-full">
+                        <div>
+                            <p id="authorName" class="font-medium text-gray-900"></p>
+                            <p class="text-sm text-gray-500">Photographer</p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <span id="likes" class="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm">❤️ 0</span>
+                        <span id="downloads" class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">⬇️ 0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ACCESS_KEY = 'TRg_G8tsIoDolyKstPKSCA89SecV49i_xBfiWbfysVU';
+        const API_URL = 'https://api.unsplash.com';
+        
+        let currentPage = 1;
+        let currentQuery = '';
+        let isLoading = false;
+
+        const gallery = document.getElementById('gallery');
+        const loadingState = document.getElementById('loadingState');
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        const modal = document.getElementById('modal');
+        const modalImage = document.getElementById('modalImage');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalDescription = document.getElementById('modalDescription');
+        const authorAvatar = document.getElementById('authorAvatar');
+        const authorName = document.getElementById('authorName');
+        const likes = document.getElementById('likes');
+        const downloads = document.getElementById('downloads');
+        const closeModal = document.getElementById('closeModal');
+
+        // Load initial photos
+        loadPhotos();
+
+        // Search functionality
+        searchBtn.addEventListener('click', performSearch);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') performSearch();
+        });
+
+        // Load more photos
+        loadMoreBtn.addEventListener('click', () => {
+            currentPage++;
+            loadPhotos(currentQuery, false);
+        });
+
+        // Modal functionality
+        closeModal.addEventListener('click', () => {
+            modal.classList.add('hidden');
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        async function loadPhotos(query = '', clearGallery = true) {
+            if (isLoading) return;
+            isLoading = true;
+
+            if (clearGallery) {
+                gallery.innerHTML = '';
+                gallery.classList.add('hidden');
+                loadingState.classList.remove('hidden');
+                currentPage = 1;
+            }
+
+            try {
+                const endpoint = query 
+                    ? `${API_URL}/search/photos?query=${encodeURIComponent(query)}&page=${currentPage}&per_page=20`
+                    : `${API_URL}/photos?page=${currentPage}&per_page=20`;
+
+                const response = await fetch(endpoint, {
+                    headers: {
+                        'Authorization': `Client-ID ${ACCESS_KEY}`
+                    }
+                });
+
+                if (!response.ok) throw new Error('Failed to fetch photos');
+
+                const data = await response.json();
+                const photos = query ? data.results : data;
+
+                if (clearGallery) {
+                    loadingState.classList.add('hidden');
+                    gallery.classList.remove('hidden');
+                }
+
+                photos.forEach(photo => {
+                    const photoElement = createPhotoElement(photo);
+                    gallery.appendChild(photoElement);
+                });
+
+                loadMoreBtn.classList.remove('hidden');
+                
+                if (photos.length < 20) {
+                    loadMoreBtn.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('Error loading photos:', error);
+                loadingState.innerHTML = `
+                    <div class="text-center py-12">
+                        <p class="text-red-600 text-lg">Failed to load photos. Please try again.</p>
+                        <button onclick="location.reload()" class="mt-4 bg-blue-600 text-white px-6 py-2 rounded-full hover:bg-blue-700">
+                            Retry
+                        </button>
+                    </div>
+                `;
+            }
+
+            isLoading = false;
+        }
+
+        function createPhotoElement(photo) {
+            const div = document.createElement('div');
+            div.className = 'masonry-item group cursor-pointer';
+            
+            div.innerHTML = `
+                <div class="relative overflow-hidden rounded-lg shadow-md hover:shadow-xl transition-all duration-300 transform hover:scale-105">
+                    <img 
+                        src="${photo.urls.small}" 
+                        alt="${photo.alt_description || 'Photo'}"
+                        class="w-full h-auto object-cover"
+                        loading="lazy"
+                    >
+                    <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-300 flex items-end">
+                        <div class="p-4 text-white transform translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+                            <p class="font-medium">${photo.user.name}</p>
+                            <p class="text-sm opacity-90">❤️ ${photo.likes}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            div.addEventListener('click', () => openModal(photo));
+            return div;
+        }
+
+        function openModal(photo) {
+            modalImage.src = photo.urls.regular;
+            modalImage.alt = photo.alt_description || 'Photo';
+            modalTitle.textContent = photo.alt_description || 'Untitled';
+            modalDescription.textContent = photo.description || 'No description available';
+            authorAvatar.src = photo.user.profile_image.medium;
+            authorName.textContent = photo.user.name;
+            likes.textContent = `❤️ ${photo.likes.toLocaleString()}`;
+            downloads.textContent = `⬇️ ${photo.downloads?.toLocaleString() || 'N/A'}`;
+            
+            modal.classList.remove('hidden');
+        }
+
+        function performSearch() {
+            const query = searchInput.value.trim();
+            if (query) {
+                currentQuery = query;
+                loadPhotos(query);
+            } else {
+                currentQuery = '';
+                loadPhotos();
+            }
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+            }
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'978d3a8704601c4f',t:'MTc1NjgxODQyOC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
